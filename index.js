@@ -57,6 +57,26 @@ app.patch("/tasks/:id", async (req, res) => {
   }
 });
 
+app.patch("/tasks/:id/edit", async (req, res) => {
+  const id = parseInt(req.params.id);
+  const updates = req.body;
+
+  try {
+    const result = await pool.query(
+      "UPDATE tasks SET description = $1 WHERE id = $2 RETURNING *",
+      [updates.description, id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "タスクが見つかりませんでした。" });
+    }
+    const updatedTodo = result.rows[0];
+    res.json(updatedTodo);
+  } catch (err) {
+    console.error("タスク更新中に問題が発生しました", err);
+    res.status(500).json({ error: "内部サーバーエラーが発生しました。" });
+  }
+});
+
 app.delete("/tasks/:id", async (req, res) => {
   const { id } = req.params;
 
