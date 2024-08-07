@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
-const pool = require("./db");
+const { pool, pool2 } = require("./db");
+const bcrypt = require("bcrypt");
 const app = express();
 const PORT = 5003;
 
@@ -12,6 +13,13 @@ const corsOption = {
 app.use(cors(corsOption));
 app.use(express.json());
 
+app.get("/users", (req, res) => {
+  pool2.query("SELECT * FROM users", (errors, results) => {
+    if (errors) throw errors;
+    return res.status(200).json(results.rows);
+  });
+});
+
 app.get("/todos", async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM tasks");
@@ -19,6 +27,81 @@ app.get("/todos", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).send("タスクの取得に失敗しました");
+  }
+});
+
+app.post("/users/signup", async (req, res) => {
+  const { username, email, password } = req.body;
+
+  if (!username || !email || !password) {
+    return res.status(400).send("すべてのフィールドを入力してください。");
+  }
+
+  if (username.trim() === "" || email.trim() === "" || password.trim() === "") {
+    return res.status(400).send("フィールドに無効な値が含まれています。");
+  }
+
+  try {
+    const checkUsername = await pool2.query(
+      "SELECT username FROM users WHERE username = $1",
+      [username]
+    );
+
+    if (checkUsername.rows.length > 0) {
+      return res.status(409).send("このユーザーネームは使用されています。");
+    }
+
+    const checkEmail = await pool2.query(
+      "SELECT email FROM users WHERE email = $1",
+      [email]
+    );
+
+    if (checkEmail.rows.length > 0) {
+      return res.status(409).send("このメールアドレスは使用されています。");
+    }
+
+    const result = await pool2.query(
+      "INSERT INTO users (username, email, password) VALUES ($1, $2, $3)",
+      [username, email, password]
+    );
+    res.status(201).send("ユーザーの作成に成功しました。");
+  } catch (err) {
+    console.error("Error executing query:", err);
+    res.status(500).send("ユーザーの作成に失敗しました。");
+  }
+});
+
+app.post("/users/login", async (req, res) => {
+  const { username, email, password } = req.body;
+
+  if (!username || !email || !password) {
+    return res.status(400).send("全てのフィールドを入力してください。");
+  }
+
+  try {
+    const result = await pool2.query(
+      "SELECT username, email, password FROM users WHERE username = $1",
+      [username]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).send("ユーザーが見つかりません。");
+    }
+
+    const user = result.rows[0];
+
+    if (user.email !== email) {
+      return res.status(401).send("メールアドレスが違います。");
+    }
+
+    if (user.password !== password) {
+      return res.status(401).send("パスワードが違います。");
+    }
+
+    res.status(200).send("ログインに成功しました。");
+  } catch (err) {
+    console.error("ログインエラー:", err.message);
+    res.status(500).send("ログインに失敗しました。");
   }
 });
 
@@ -95,6 +178,26 @@ app.delete("/tasks/:id", async (req, res) => {
   } catch (err) {
     console.error("タスクの削除中にエラーが発生しました。", err);
     res.status(500).json({ error: "内部サーバエラーが発生しました。" });
+  }
+});
+
+app.delete("/users/:id", async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    const result = await pool2.query(
+      "DELETE FROM users WHERE id = $1 RETURNING *",
+      [userId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "USER_NOT_FOUND" });
+    }
+
+    res.status(200).json({ message: "USER_DELETED_SUCCESSFULLY" });
+  } catch (err) {
+    console.error("ユーザー削除エラー:", err.message);
+    res.status(500).json({ error: "USER_DELETION_FAILED" });
   }
 });
 
