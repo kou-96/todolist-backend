@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const { pool, pool2 } = require("./db");
-const bcrypt = require("bcrypt");
+const pool = require("./db");
 const app = express();
 const PORT = 5003;
 
@@ -14,7 +13,7 @@ app.use(cors(corsOption));
 app.use(express.json());
 
 app.get("/users", (req, res) => {
-  pool2.query("SELECT * FROM users", (errors, results) => {
+  pool.query("SELECT * FROM users", (errors, results) => {
     if (errors) throw errors;
     return res.status(200).json(results.rows);
   });
@@ -34,74 +33,86 @@ app.post("/users/signup", async (req, res) => {
   const { username, email, password } = req.body;
 
   if (!username || !email || !password) {
-    return res.status(400).send("すべてのフィールドを入力してください。");
-  }
-
-  if (username.trim() === "" || email.trim() === "" || password.trim() === "") {
-    return res.status(400).send("フィールドに無効な値が含まれています。");
+    return res
+      .status(400)
+      .json({ message: "すべてのフィールドを入力してください。" });
   }
 
   try {
-    const checkUsername = await pool2.query(
-      "SELECT username FROM users WHERE username = $1",
-      [username]
+    const result = await pool.query(
+      "SELECT * FROM users WHERE username = $1 OR email = $2",
+      [username, email]
     );
 
-    if (checkUsername.rows.length > 0) {
-      return res.status(409).send("このユーザーネームは使用されています。");
+    let usernameError = false;
+    let emailError = false;
+
+    for (const row of result.rows) {
+      if (row.username === username) {
+        usernameError = true;
+      }
+      if (row.email === email) {
+        emailError = true;
+      }
     }
 
-    const checkEmail = await pool2.query(
-      "SELECT email FROM users WHERE email = $1",
-      [email]
-    );
-
-    if (checkEmail.rows.length > 0) {
-      return res.status(409).send("このメールアドレスは使用されています。");
+    if (usernameError && emailError) {
+      return res.status(409).json({
+        message: "ユーザー名とメールアドレスの両方が使用されています。",
+      });
+    }
+    if (usernameError) {
+      return res
+        .status(409)
+        .json({ message: "このユーザーネームは既に使用されています。" });
+    }
+    if (emailError) {
+      return res
+        .status(409)
+        .json({ message: "このメールアドレスは既に使用されています。" });
     }
 
-    const result = await pool2.query(
+    await pool.query(
       "INSERT INTO users (username, email, password) VALUES ($1, $2, $3)",
       [username, email, password]
     );
-    res.status(201).send("ユーザーの作成に成功しました。");
+    res
+      .status(201)
+      .json({ message: "ユーザーの作成に成功しました。", username });
   } catch (err) {
     console.error("Error executing query:", err);
-    res.status(500).send("ユーザーの作成に失敗しました。");
+    res.status(500).json({ message: "ユーザーの作成に失敗しました。" });
   }
 });
 
 app.post("/users/login", async (req, res) => {
-  const { username, email, password } = req.body;
+  const { email, password } = req.body;
 
-  if (!username || !email || !password) {
-    return res.status(400).send("全てのフィールドを入力してください。");
+  if (!email || !password) {
+    return res
+      .status(400)
+      .json({ message: "メールアドレスとパスワードを入力してください。" });
   }
 
   try {
-    const result = await pool2.query(
-      "SELECT username, email, password FROM users WHERE username = $1",
-      [username]
+    const result = await pool.query(
+      "SELECT * FROM users WHERE email = $1 AND password = $2",
+      [email, password]
     );
 
-    if (result.rowCount === 0) {
-      return res.status(404).send("ユーザーが見つかりません。");
+    if (result.rows.length === 0) {
+      return res
+        .status(401)
+        .json({ message: "無効なメールアドレスまたはパスワードです。" });
     }
 
     const user = result.rows[0];
-
-    if (user.email !== email) {
-      return res.status(401).send("メールアドレスが違います。");
-    }
-
-    if (user.password !== password) {
-      return res.status(401).send("パスワードが違います。");
-    }
-
-    res.status(200).send("ログインに成功しました。");
+    res
+      .status(200)
+      .json({ message: "ログインに成功しました。", username: user.username });
   } catch (err) {
-    console.error("ログインエラー:", err.message);
-    res.status(500).send("ログインに失敗しました。");
+    console.error("Error executing query:", err);
+    res.status(500).json({ message: "ログインに失敗しました。" });
   }
 });
 
@@ -136,7 +147,7 @@ app.patch("/tasks/:id", async (req, res) => {
     );
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: "Error updating todo" });
+    res.status(500).json({ error: "Todo の更新中にエラーが発生しました。" });
   }
 });
 
@@ -185,19 +196,21 @@ app.delete("/users/:id", async (req, res) => {
   const userId = req.params.id;
 
   try {
-    const result = await pool2.query(
+    const result = await pool.query(
       "DELETE FROM users WHERE id = $1 RETURNING *",
       [userId]
     );
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ error: "USER_NOT_FOUND" });
+      return res
+        .status(404)
+        .json({ error: "ユーザーが見つかりませんでした。" });
     }
 
-    res.status(200).json({ message: "USER_DELETED_SUCCESSFULLY" });
+    res.status(200).json({ message: "ユーザーは正常に削除されました。" });
   } catch (err) {
     console.error("ユーザー削除エラー:", err.message);
-    res.status(500).json({ error: "USER_DELETION_FAILED" });
+    res.status(500).json({ error: "ユーザーの削除に失敗しました。" });
   }
 });
 
