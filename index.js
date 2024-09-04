@@ -36,11 +36,16 @@ app.get("/todos/:user_id", async (req, res) => {
   }
 });
 
-app.get("/users", (req, res) => {
-  pool.query("SELECT * FROM users", (errors, results) => {
-    if (errors) throw errors;
+app.get("/users", async (req, res) => {
+  try {
+    const results = await pool.query("SELECT * FROM users");
     return res.status(200).json(results.rows);
-  });
+  } catch (error) {
+    console.error("Database query error:", error);
+    return res
+      .status(500)
+      .json({ error: "内部サーバーエラーが発生しました。" });
+  }
 });
 
 app.post("/users/signup", async (req, res) => {
@@ -90,12 +95,10 @@ app.post("/users/signup", async (req, res) => {
       "INSERT INTO users (username, email, password) VALUES ($1, $2, $3) RETURNING *",
       [username, email, password]
     );
-    res
-      .status(201)
-      .json({
-        message: "ユーザーの作成に成功しました。",
-        data: result.rows[0],
-      });
+    res.status(201).json({
+      message: "ユーザーの作成に成功しました。",
+      data: result.rows[0],
+    });
   } catch (err) {
     console.error("Error executing query:", err);
     res.status(500).json({ message: "ユーザーの作成に失敗しました。" });
